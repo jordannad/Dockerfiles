@@ -1,0 +1,95 @@
+#Download base image ubuntu 14.04
+FROM ubuntu:14.04
+
+#Update Ubuntu software repository
+RUN apt-get -y update
+RUN apt-get -y install nano
+
+#Intall hypre, silo, openmpi, tcl
+
+RUN apt-get install -y build-essential
+RUN apt-get install -y gfortran
+RUN apt-get install -y tcl-dev
+RUN apt-get install -y tk-dev
+RUN apt-get install -y curl
+
+RUN apt-get install -y libibnetdisc-dev
+RUN apt-get install -y openmpi-common
+RUN apt-get install -y openmpi-bin openmpi-common openssh-client openssh-server libopenmpi1.6 libopenmpi-dev
+
+RUN curl https://wci.llnl.gov/codes/silo/silo-4.9.1/silo-4.9.1.tar.gz -o silo-4.9.1.tar.gz
+RUN tar -xvf silo-4.9.1.tar.gz
+
+RUN curl https://computation.llnl.gov/projects/hypre-scalable-linear-solvers-multigrid-methods/download/hypre-2.9.0b.tar.gz -o hypre-2.9.0b.tar.gz
+RUN tar -xvf hypre-2.9.0b.tar.gz
+
+WORKDIR /hypre-2.9.0b/src
+RUN ./configure
+RUN make all install
+
+WORKDIR /silo-4.9.1
+RUN ./configure -disable-silex
+RUN make all install
+
+#Download factor of safety from repository
+#RUN pwd
+WORKDIR /
+RUN mkdir -p FSModule
+WORKDIR /FSModule
+RUN apt install -y git
+RUN git config --global user.email "jordannad@gmail.com"
+RUN git config --global user.name "jordannad"
+RUN git clone https://github.com/jordannad/FSIntegration
+
+#Download parflow tar file
+WORKDIR /
+RUN mkdir -p Parflow.743 
+RUN curl -L https://github.com/parflow/parflow/archive/v3.2.0.tar.gz -o parflowv3.2.0.tar.gz
+RUN tar -C /Parflow.743/ -xvf parflowv3.2.0.tar.gz
+
+#Define the environment variables
+ENV CC gcc
+ENV CXX g++
+ENV FC gfortran
+ENV F77 gfortran
+ENV PARFLOW_DIR /Parflow.743
+ENV FS_DIR /FSModule/FSIntegration
+ENV SILO_DIR /silo-4.9.1
+ENV HYPRE_DIR /hypre-2.9.0b/src/hypre
+#ENV PATH ~/openmpi/ompi
+
+#Build factor of safety module
+WORKDIR /FSModule/FSIntegration
+RUN make
+
+#Change number of soil levels in clmVarPar File
+WORKDIR /Parflow.743/parflow-3.2.0/pfsimulator/clm
+RUN ls -a
+#RUN sed -i 's/10/4/' clm_varpar.F90
+
+#Install parflow (in both pfsimulator and pftools)
+WORKDIR /Parflow.743/parflow-3.2.0/pfsimulator
+RUN ls -a
+RUN ./configure --prefix=$PARFLOW_DIR --with-clm --enable-timing --with-silo=$SILO_DIR --with-hypre=$HYPRE_DIR --with-amps=mpi1 --with-amps-sequential-io
+#RUN sed '' config/Makefile.config
+RUN make install
+
+WORKDIR /Parflow.743/parflow-3.2.0/pftools
+RUN ./configure --prefix=$PARFLOW_DIR --with-silo=$SILO_DIR --with-amps=mpi1 --with-amps-sequential-io
+## No longer need to edit configure files before the make install
+RUN make install
+
+#Remove the function keyword from two places in run file in bin folder
+WORKDIR /Parflow.743/bin
+RUN ls -a
+#RUN sed -n '1,55p' run
+RUN sed -i '0,/function /s/function//' run
+RUN sed -i '0,/function /s/function//' run
+RUN sed -n '1,55p' run
+
+##Easy test
+#WORKDIR /Parflow.743/parflow-3.2.0/test/
+#RUN make check
+
+WORKDIR /data/
+
